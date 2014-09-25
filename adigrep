@@ -1,0 +1,110 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+use File::Find;
+use File::Slurp qw(read_file);
+use CGI::Ex::Dump qw(debug);
+use Term::ANSIColor;
+use Getopt::Long qw(GetOptions);
+use HTML::Strip;
+
+my $p = bless {}, __PACKAGE__;
+$p->main;
+exit;
+
+#TODO conf file?
+sub log_dir {"Configure me!"}
+
+sub file_color {color('green')}
+sub line_match_color {color('red')}
+sub sender_color {color('magenta')}
+sub indent {'    '}
+
+
+sub main {
+    my $self = shift;
+    my $context_lines = $self->options->{'context'};
+    my $grep_for = $ARGV[0] || '';
+
+    my @files;
+    File::Find::find({wanted => sub {push @files, $File::Find::name if -f $_ } }, $self->log_dir);
+
+    foreach my $file (@files) {
+        my @content = read_file($file);
+        my $i = 0;
+        my @matching_line_numbers = map {$i++; $_ =~ m/\Q$grep_for\E/i ? $i : ()} @content;
+
+        if ( scalar @matching_line_numbers ) {
+            $file =~ s/(\(|\)|\ )/\\$1/g;
+            print $self->file_color, $file."\n";
+            print color('reset');
+
+            # TODO: merge content if there is overlap
+            foreach my $line_number(@matching_line_numbers) {
+                $line_number = $line_number-1;
+                # Print context before
+                $self->print_chat_line({line=>$_}) foreach @content[($line_number-$context_lines-1)..$line_number-1];
+                # Matching line
+                $self->print_chat_line({line => $content[$line_number], highlight_match => $grep_for});
+                # Context after
+                $self->print_chat_line({line=>$_}) foreach @content[$line_number+1..($line_number+$context_lines+1)];
+            }
+            print "\n";
+        }
+    }
+}
+
+
+sub print_chat_line {
+    my $self = shift;
+    my $args = shift;
+    my $line = $args->{'line'}||'';
+    my $highlight_match = $args->{'highlight_match'};
+    
+    my $hs = HTML::Strip->new();
+
+    my ($sender) = $line =~ m/sender="(.*?)\@/i;
+    my ($time) = $line =~ m/time="(.*?)"/;
+    $sender ||= '';
+    $time ||= '';
+    $time =~ s/:\d{2}-\d{4}$//;
+
+    $line = $hs->parse($line);
+    $line =~ s/\n//g;
+    return 0 unless $line && $sender;
+
+    if ($highlight_match) {
+        my $match_color = $self->line_match_color;
+        my $reset = color('reset');
+        $line =~ s/(\Q$highlight_match\E)/$match_color$1$reset/gi;
+    }
+    print $self->indent, $self->sender_color,"$sender ($time):",color('reset')," $line\n"; 
+}
+
+
+sub options {
+    my $self = shift;
+
+    if (! $self->{'_options'}) {
+        my $defaults = $self->option_defaults;
+        my $options = {};
+        GetOptions($options, $self->option_params) or $options->{'help'} = 1;
+        $self->{'_options'} = { %$defaults, %$options };
+    }
+
+    return $self->{'_options'};
+}
+
+sub option_params {
+    qw(
+        context|c=s 
+    );
+}
+
+sub option_defaults {
+    return {
+        'context'  => 0,
+    };
+}
