@@ -14,7 +14,6 @@ my $p = bless {}, __PACKAGE__;
 $p->main;
 exit;
 
-#TODO conf file?
 sub log_dir {"Configure me!"}
 
 sub file_color {color('green')}
@@ -26,10 +25,16 @@ sub indent {'    '}
 sub main {
     my $self = shift;
     my $context_lines = $self->options->{'context'};
+    my $grep_user = $self->options->{'user'};
     my $grep_for = $ARGV[0] || '';
 
     my @files;
-    File::Find::find({wanted => sub {push @files, $File::Find::name if -f $_ } }, $self->log_dir);
+    File::Find::find({wanted => sub {
+        push @files, $File::Find::name if ( 
+          -f $_ 
+          && (!$grep_user || (split("/",$File::Find::dir))[-1] =~ /^\Q$grep_user\E\@/)
+        )
+    } }, $self->log_dir);
 
     foreach my $file (@files) {
         my @content = read_file($file);
@@ -99,12 +104,16 @@ sub options {
 
 sub option_params {
     qw(
-        context|c=s 
+        context|c=s
+        user|u=s
     );
 }
 
 sub option_defaults {
     return {
         'context'  => 0,
+        'user'     => 0,
     };
 }
+
+
